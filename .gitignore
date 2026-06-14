@@ -1,0 +1,20 @@
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ipynb_checkpoints/
+
+# Node / Vite
+steam-game-web/frontend/node_modules/
+steam-game-web/frontend/dist/
+
+# Local logs
+*.log
+
+# Local environment files
+.env
+steam-game-web/frontend/.env
+
+# Deprecated duplicate data location
+steam-game-web/backend/data/

@@ -1,0 +1,56 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-steam-darkBg text-slate-200 antialiased font-sans;
+    scrollbar-width: thin;
+    scrollbar-color: #1f2d40 #0b1622;
+  }
+}
+
+/* Compact scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #0f141b;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #263848;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #4b6d92;
+}
+
+/* Shared hover transition */
+.transition-glow {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.transition-glow:hover {
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.22);
+  border-color: rgba(143, 185, 216, 0.35);
+}
+
+/* Loading placeholder */
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.shimmer {
+  background: linear-gradient(90deg, #171f2a 25%, #1d2835 50%, #171f2a 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite linear;
+}

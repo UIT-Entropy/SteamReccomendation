@@ -1,0 +1,288 @@
+--Khối config 
+from dataclasses import dataclass
+#setting tham số để bắt đầu crawl data
+@dataclass
+class Config:
+    cc: str = "us"
+    lang: str = "english"
+    pages: int = 6000
+    per_page: int = 50
+    sleep_seconds: float = 1
+    timeout_seconds: int = 25
+    max_retries: int = 3
+    partial_save_every: int = 20
+--Khối client 
+import time
+import requests
+from typing import Dict, Any, Optional
+from Config import Config
+#Gửi request và retry nếu bị chặn  
+
+class Client:
+    def __init__(self, cfg: Config):
+        self.cfg = cfg
+        self.session = requests.Session()
+
+    def get(self, url: str, params: Dict[str, Any]) -> requests.Response:
+        headers = {
+            "User-Agent": "Mozilla/5.0 (SteamDataCollector/2.0)",
+            "Accept": "*/*",
+        }
+        SteamError: Optional[Exception] = None
+        for attempt in range(1, self.cfg.max_retries + 1):
+            try:
+                response = self.session.get(
+                    url,
+                    params=params,
+                    headers=headers,
+                    timeout=self.cfg.timeout_seconds,
+                )
+                response.raise_for_status()
+                return response
+            #nếu gặp lỗi thì chờ 
+            except Exception as e:
+                SteamError = e
+                backoff = self.cfg.sleep_seconds * (2 ** (attempt - 1))
+                print(f"Retry lần thứ {attempt} do lỗi: {e}")
+                time.sleep(backoff)
+        raise RuntimeError(SteamError)
+--Khối htmlcleaner 
+import re
+from bs4 import BeautifulSoup
+from typing import Optional
+
+def Cleaner(html: Optional[str]) -> str:
+    if not html:
+        return ""
+    soup = BeautifulSoup(html, "html.parser")
+    text = soup.get_text(" ", strip=True)
+    return re.sub(r"\s+", " ", text)
+--Khối Search 
+import re
+from typing import List
+from bs4 import BeautifulSoup
+from tqdm import tqdm
+#Lấy AppID 
+Search = "https://store.steampowered.com/search/results/"
+class SearchService:
+    def __init__(self, http):
+        self.http = http
+    def ParseAppid(self, html: str, limit: int) -> List[int]:
+        soup = BeautifulSoup(html, "html.parser")
+        seen = set()
+        appids = []
+        for a in soup.find_all("a", href=True):
+            m = re.search(r"/app/(\d+)/", a["href"])
+            if not m:
+                continue
+            appid = int(m.group(1))
+            if appid in seen:
+                continue
+            seen.add(appid)
+            appids.append(appid)
+            if len(appids) >= limit:
+                break
+        return appids
+    
+    def FetchPage(self, cfg) -> List[int]:
+        appids = []
+        for idx in tqdm(range(cfg.pages), desc = "Đang Search"):
+            start = idx * cfg.per_page
+            params = {
+                "supportedlang": cfg.lang,
+                "ndl": 1,
+                "infinite": 1,
+                "start": start,
+                "count": cfg.per_page,
+                "cc": cfg.cc,
+                "l": cfg.lang,
+            }
+            resp = self.http.get(Search, params)
+            payload = resp.json()
+            html = payload.get("results_html", "")
+            Newids = self.ParseAppid(html, cfg.per_page)
+            if not Newids:
+                break
+            appids.extend(Newids)
+        return appids
+--Khối Saving 
+import csv
+import json
+from typing import List, Dict, Any
+
+def SaveCSV(rows: List[Dict[str, Any]], path: str):
+    if not rows:
+        return
+    with open(path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=rows[0].keys())
+        writer.writeheader()
+        writer.writerows(rows)
+def SaveJSON(data: Any, path: str):
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+--Khối tagParser
+from bs4 import BeautifulSoup
+
+def ParseTag(html: str) -> str:
+    soup = BeautifulSoup(html, "html.parser")
+    tags = []
+    container = soup.find("div", class_=lambda c: c and "glance_tags" in c)
+    if container:
+        for a in container.find_all("a", class_="app_tag"):
+            txt = a.get_text(strip=True)
+            if txt:
+                tags.append(txt)
+    return ",".join(dict.fromkeys(tags))
+--Khối SystemParser 
+import re
+from bs4 import BeautifulSoup
+from typing import Optional, Tuple
+def ParseSysReq(html: str):
+    soup = BeautifulSoup(html, "html.parser")
+    block = soup.find("div", class_=lambda c: c and "game_area_sys_req" in c)
+    if not block:
+        return None, None, None
+    osReq = memoryReq = cpuReq = None
+    for li in block.find_all("li"):
+        strong = li.find("strong")
+        if not strong:
+            continue
+        label = strong.get_text(strip=True).lower()
+        text = li.get_text(" ", strip=True)
+        text = text.replace(strong.get_text(strip=True), "").strip(" :")
+        if "os" in label and not osReq:
+            osReq = text
+        elif "memory" in label and not memoryReq:
+            memoryReq = text
+        elif "processor" in label and not cpuReq:
+            cpuReq = text
+    return osReq, memoryReq, cpuReq
+--Khối ReviewParser 
+import re
+from bs4 import BeautifulSoup
+from typing import Optional, Tuple
+def ParseReview(http, appid:int) -> Tuple[Optional[int], Optional[int], Optional[int]]:
+    url = f"https://store.steampowered.com/appreviews/{appid}"
+    params = {
+        "json": 1,
+        "filter": "summary",
+        "language": "english"
+    }
+    try:
+        resp = http.get(url, params=params)
+        if not resp:
+            return None, None, None
+        data = resp.json()
+        if not data.get("success"):
+            return None, None, None
+        summary_data = data.get("query_summary", {})
+        ReviewScore = summary_data.get("review_score")
+        Positive = summary_data.get("total_positive")
+        Negative = summary_data.get("total_negative")
+        return ReviewScore, Positive, Negative
+    except Exception:
+        return None, None, None
+
+
+--Khối Extractor 
+from htmlCleaner import Cleaner
+
+def Extract(appid: int, d: dict) -> dict:
+    price = d.get("price_overview")
+    if price and price.get("final") is not None:
+        finalPrice = price.get("final") / 100
+    else:
+        finalPrice = 0
+    thumbnail = d.get("header_image") or {}
+    return {
+        "Appid": appid,
+        "Name": d.get("name"),
+        "Type": d.get("type"),
+        "ReleaseDate": (d.get("release_date") or {}).get("date"),
+        "Genres": ",".join(
+            g.get("description", "")
+            for g in (d.get("genres") or [])
+            if g.get("description")
+        ),
+        "Developers": ",".join(d.get("developers") or []),
+        "Publishers": ",".join(d.get("publishers") or []),
+        "Description": Cleaner(d.get("detailed_description")),
+        "price": f"{finalPrice}$",
+        "Thumbnail" : thumbnail,
+    }
+--Khối appDetails
+AppDetail = "https://store.steampowered.com/api/appdetails"
+
+class AppDetails:
+    def __init__(self, http, cfg):
+        self.http = http
+        self.cfg = cfg
+    def fetch(self, appid: int) -> dict:
+        params = {
+            "appids": appid,
+            "cc": self.cfg.cc,
+            "l": self.cfg.lang,
+        }
+        resp = self.http.get(AppDetail, params)
+        data = resp.json()
+        entry = data.get(str(appid), {})
+        if not entry.get("success"):
+            return {"appid": appid, "success": False}
+        return entry.get("data", {}) 
+--Khối Crawler 
+import time
+from Search import SearchService
+from appDetails import AppDetails
+from Extractor import Extract
+from tagParser import ParseTag
+from ReviewParser import ParseReview
+from SystemParser import ParseSysReq
+from tqdm import tqdm 
+AppStore = "https://store.steampowered.com/app/{appid}/"
+class SteamCrawler:
+    def __init__(self, http, cfg):
+        self.cfg = cfg
+        self.http = http
+        self.search = SearchService(http)
+        self.appdetails = AppDetails(http, cfg)
+    def crawl(self):
+        appids = self.search.FetchPage(self.cfg)
+        results = []
+        for rank, appid in enumerate(tqdm(appids, desc = "Đang cào"), start=1):
+            data = self.appdetails.fetch(appid)
+            if not data:
+                continue
+            row = Extract(appid, data)
+            resp = self.http.get(
+                AppStore.format(appid=appid),
+                {"cc": self.cfg.cc, "l": self.cfg.lang},
+            )
+            html = resp.text
+            row["Tags"] = ParseTag(html)
+            score, posi, nega = ParseReview(self.http, appid)
+            row["ReviewScore"] = score
+            row["PositiveReview"] = posi
+            row["NegativeReview"] = nega
+            OsReq, MemReq, CpuReq = ParseSysReq(html)
+            row["OsRequirement"] = OsReq
+            row["MemoryRequirement"] = MemReq
+            row["CpuRequirement"] = CpuReq
+            row["Rank"] = rank
+            results.append(row)
+            time.sleep(self.cfg.sleep_seconds)
+        return results
+--Khối main 
+from Config import Config
+from Client import Client
+from Crawler import SteamCrawler
+from Saving import SaveCSV, SaveJSON
+
+def main():
+    cfg = Config(pages=600, per_page=50)
+    http = Client(cfg)
+    crawler = SteamCrawler(http, cfg)
+    rows = crawler.crawl()
+    SaveCSV(rows, f"SteamGames.csv")
+    SaveJSON({"Games": rows}, f"SteamGames.json")
+if __name__ == "__main__":
+    main()
