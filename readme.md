@@ -117,22 +117,6 @@ Notebook EDA đọc:
 - [data/raw/SteamGames.csv](data/raw/SteamGames.csv)
 - [data/processed/SteamGames_cleaned.csv](data/processed/SteamGames_cleaned.csv)
 
-Notebook EDA cũng lưu một số feature hữu ích trở lại `data/processed/SteamGames_cleaned.csv`, ví dụ:
-
-- `price_numeric`
-- `price_type`
-- `TotalReviews`
-- `ReviewRatio`
-- `ReviewConfidence`
-- `BayesianRating`
-- `PopularityScore`
-- `FreshnessScore`
-- `AffordabilityScore`
-- `PriceBucket`
-- `DiscoveryScore`
-
-Vì vậy thứ tự nên là: crawl trước, clean sau, EDA cuối cùng.
-Feature engineering đang nằm trong notebook EDA, không cần chạy thêm file feature engineering riêng.
 
 ### 5. Chạy Web App
 
@@ -178,7 +162,7 @@ Nếu backend chạy ở URL khác, tạo file `steam-game-web/frontend/.env`:
 VITE_API_BASE_URL=http://localhost:8000
 ```
 
-### 6. Quick Start Cho Máy Mới Pull Code
+### 6. Quick Start
 
 Từ thư mục gốc project:
 
